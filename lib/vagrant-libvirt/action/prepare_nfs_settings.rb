@@ -65,7 +65,7 @@ module VagrantPlugins
             result << data if type == :stdout
           end
 
-          ips = result.chomp.split("\n")
+          ips = result.chomp.split("\n").uniq
           @logger.info("guest IPs: #{ips.join(', ')}")
           ips.each do |ip|
             next if ip == ssh_host
@@ -77,7 +77,7 @@ module VagrantPlugins
 
         # Check if we can open a connection to the host
         def ping(host, timeout = 3)
-          timeout(timeout) do
+          ::Timeout.timeout(timeout) do
             s = TCPSocket.new(host, 'echo')
             s.close
           end
