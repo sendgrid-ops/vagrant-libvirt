@@ -48,6 +48,7 @@ module VagrantPlugins
       attr_accessor :management_network_address
       attr_accessor :management_network_mode
       attr_accessor :management_network_mac
+      attr_accessor :management_network_guest_ipv6
 
       # Default host prefix (alternative to use project folder name)
       attr_accessor :default_prefix
@@ -55,8 +56,12 @@ module VagrantPlugins
       # Domain specific settings used while creating new domain.
       attr_accessor :uuid
       attr_accessor :memory
+      attr_accessor :channel
       attr_accessor :cpus
       attr_accessor :cpu_mode
+      attr_accessor :cpu_model
+      attr_accessor :cpu_fallback
+      attr_accessor :cpu_features
       attr_accessor :loader
       attr_accessor :boot_order
       attr_accessor :machine_type
@@ -69,6 +74,8 @@ module VagrantPlugins
       attr_accessor :kernel
       attr_accessor :cmd_line
       attr_accessor :initrd
+      attr_accessor :dtb
+      attr_accessor :emulator_path
       attr_accessor :graphics_type
       attr_accessor :graphics_autoport
       attr_accessor :graphics_port
@@ -77,6 +84,13 @@ module VagrantPlugins
       attr_accessor :video_type
       attr_accessor :video_vram
       attr_accessor :keymap
+      attr_accessor :kvm_hidden
+
+      # Sets the information for connecting to a host TPM device
+      # Only supports socket-based TPMs
+      attr_accessor :tpm_model
+      attr_accessor :tpm_type
+      attr_accessor :tpm_path
 
       # Sets the max number of NICs that can be created
       # Default set to 8. Don't change the default unless you know
@@ -90,8 +104,20 @@ module VagrantPlugins
       # Inputs
       attr_accessor :inputs
 
+      # Channels
+      attr_accessor :channels
+
+      # PCI device passthrough
+      attr_accessor :pcis
+
+      # USB device passthrough
+      attr_accessor :usbs
+
       # Suspend mode
       attr_accessor :suspend_mode
+
+      # Autostart
+      attr_accessor :autostart
 
       def initialize
         @uri               = UNSET_VALUE
@@ -107,12 +133,16 @@ module VagrantPlugins
         @management_network_address = UNSET_VALUE
         @management_network_mode = UNSET_VALUE
         @management_network_mac  = UNSET_VALUE
+        @management_network_guest_ipv6  = UNSET_VALUE
 
         # Domain specific settings.
         @uuid              = UNSET_VALUE
         @memory            = UNSET_VALUE
         @cpus              = UNSET_VALUE
         @cpu_mode          = UNSET_VALUE
+        @cpu_model         = UNSET_VALUE
+        @cpu_fallback      = UNSET_VALUE
+        @cpu_features      = UNSET_VALUE
         @loader            = UNSET_VALUE
         @machine_type      = UNSET_VALUE
         @machine_arch      = UNSET_VALUE
@@ -123,7 +153,9 @@ module VagrantPlugins
         @volume_cache      = UNSET_VALUE
         @kernel            = UNSET_VALUE
         @initrd            = UNSET_VALUE
+        @dtb               = UNSET_VALUE
         @cmd_line          = UNSET_VALUE
+        @emulator_path     = UNSET_VALUE
         @graphics_type     = UNSET_VALUE
         @graphics_autoport = UNSET_VALUE
         @graphics_port     = UNSET_VALUE
@@ -132,6 +164,11 @@ module VagrantPlugins
         @video_type        = UNSET_VALUE
         @video_vram        = UNSET_VALUE
         @keymap            = UNSET_VALUE
+        @kvm_hidden        = UNSET_VALUE
+
+        @tpm_model         = UNSET_VALUE
+        @tpm_type          = UNSET_VALUE
+        @tpm_path          = UNSET_VALUE
 
         @nic_adapter_count = UNSET_VALUE
 
@@ -144,8 +181,20 @@ module VagrantPlugins
         # Inputs
         @inputs            = UNSET_VALUE
 
+        # Channels
+        @channels          = UNSET_VALUE
+
+        # PCI device passthrough
+        @pcis              = UNSET_VALUE
+
+        # USB device passthrough
+        @usbs              = UNSET_VALUE
+
         # Suspend mode
         @suspend_mode      = UNSET_VALUE
+
+        # Autostart
+        @autostart         = UNSET_VALUE
       end
 
       def boot(device)
@@ -183,6 +232,21 @@ module VagrantPlugins
         raise 'Only four cdroms may be attached at a time'
       end
 
+      def cpu_feature(options={})
+        if options[:name].nil? || options[:policy].nil?
+          raise 'CPU Feature name AND policy must be specified'
+        end
+
+        if @cpu_features == UNSET_VALUE
+          @cpu_features = []
+        end
+
+        @cpu_features.push({
+          name:   options[:name],
+          policy: options[:policy]
+        })
+      end
+
       def input(options={})
         if options[:type].nil? || options[:bus].nil?
           raise 'Input type AND bus must be specified'
@@ -195,6 +259,66 @@ module VagrantPlugins
         @inputs.push({
           type: options[:type],
           bus:  options[:bus]
+        })
+      end
+
+      def channel(options={})
+        if options[:type].nil?
+            raise "Channel type must be specified."
+        elsif options[:type] == 'unix' && options[:target_type] == 'guestfwd'
+            # Guest forwarding requires a target (ip address) and a port
+            if options[:target_address].nil? || options[:target_port].nil? ||
+               options[:source_path].nil?
+              raise 'guestfwd requires target_address, target_port and source_path'
+            end
+        end
+
+        if @channels == UNSET_VALUE
+          @channels = []
+        end
+
+        @channels.push({
+          type: options[:type],
+          source_mode: options[:source_mode],
+          source_path: options[:source_path],
+          target_address: options[:target_address],
+          target_name: options[:target_name],
+          target_port: options[:target_port],
+          target_type: options[:target_type]
+        })
+      end
+
+      def pci(options={})
+        if options[:bus].nil? || options[:slot].nil? || options[:function].nil?
+          raise 'Bus AND slot AND function must be specified. Check `lspci` for that numbers.'
+        end
+
+        if @pcis == UNSET_VALUE
+          @pcis = []
+        end
+
+        @pcis.push({
+          bus:       options[:bus],
+          slot:      options[:slot],
+          function:  options[:function]
+        })
+      end
+
+      def usb(options={})
+        if (options[:bus].nil? || options[:device].nil?) && options[:vendor].nil? && options[:product].nil?
+          raise 'Bus and device and/or vendor and/or product must be specified. Check `lsusb` for these.'
+        end
+
+        if @usbs == UNSET_VALUE
+          @usbs = []
+        end
+
+        @usbs.push({
+          bus:           options[:bus],
+          device:        options[:device],
+          vendor:        options[:vendor],
+          product:       options[:product],
+          startupPolicy: options[:startupPolicy],
         })
       end
 
@@ -320,6 +444,7 @@ module VagrantPlugins
         @management_network_address = '192.168.121.0/24' if @management_network_address == UNSET_VALUE
         @management_network_mode = 'nat' if @management_network_mode == UNSET_VALUE
         @management_network_mac = nil if @management_network_mac == UNSET_VALUE
+        @management_network_guest_ipv6 = 'yes' if @management_network_guest_ipv6 == UNSET_VALUE
 
         # generate a URI if none is supplied
         @uri = _generate_uri() if @uri == UNSET_VALUE
@@ -329,6 +454,9 @@ module VagrantPlugins
         @memory = 512 if @memory == UNSET_VALUE
         @cpus = 1 if @cpus == UNSET_VALUE
         @cpu_mode = 'host-model' if @cpu_mode == UNSET_VALUE
+        @cpu_model = 'qemu64' if @cpu_model == UNSET_VALUE
+        @cpu_fallback = 'allow' if @cpu_fallback == UNSET_VALUE
+        @cpu_features = [] if @cpu_features == UNSET_VALUE
         @loader = nil if @loader == UNSET_VALUE
         @machine_type = nil if @machine_type == UNSET_VALUE
         @machine_arch = nil if @machine_arch == UNSET_VALUE
@@ -340,6 +468,7 @@ module VagrantPlugins
         @kernel = nil if @kernel == UNSET_VALUE
         @cmd_line = '' if @cmd_line == UNSET_VALUE
         @initrd = '' if @initrd == UNSET_VALUE
+        @dtb = nil if @dtb == UNSET_VALUE
         @graphics_type = 'vnc' if @graphics_type == UNSET_VALUE
         @graphics_autoport = 'yes' if @graphics_port == UNSET_VALUE
         @graphics_autoport = 'no' if @graphics_port != UNSET_VALUE
@@ -352,7 +481,12 @@ module VagrantPlugins
         @video_type = 'cirrus' if @video_type == UNSET_VALUE
         @video_vram = 9216 if @video_vram == UNSET_VALUE
         @keymap = 'en-us' if @keymap == UNSET_VALUE
+        @kvm_hidden = false if @kvm_hidden == UNSET_VALUE
+        @tpm_model = 'tpm-tis' if @tpm_model == UNSET_VALUE
+        @tpm_type = 'passthrough' if @tpm_type == UNSET_VALUE
+        @tpm_path = nil if @tpm_path == UNSET_VALUE
         @nic_adapter_count = 8 if @nic_adapter_count == UNSET_VALUE
+        @emulator_path = nil if @emulator_path == UNSET_VALUE
 
         # Boot order
         @boot_order = [] if @boot_order == UNSET_VALUE
@@ -364,9 +498,20 @@ module VagrantPlugins
         # Inputs
         @inputs = [{:type => "mouse", :bus => "ps2"}] if @inputs == UNSET_VALUE
 
+        # Channels
+        @channels = [ ] if @channels == UNSET_VALUE
+
+        # PCI device passthrough
+        @pcis = [] if @pcis == UNSET_VALUE
+
+        # USB device passthrough
+        @usbs = [] if @usbs == UNSET_VALUE
+
         # Suspend mode
         @suspend_mode = "pause" if @suspend_mode == UNSET_VALUE
 
+        # Autostart
+        @autostart = false if @autostart == UNSET_VALUE
       end
 
       def validate(machine)
@@ -375,6 +520,12 @@ module VagrantPlugins
         machine.provider_config.disks.each do |disk|
           if disk[:path] and disk[:path][0] == '/'
             errors << "absolute volume paths like '#{disk[:path]}' not yet supported"
+          end
+        end
+
+        machine.config.vm.networks.each do |_type, opts|
+          if opts[:mac] && opts[:mac].downcase! && !(opts[:mac] =~ /\A([0-9a-f]{2}:){5}([0-9a-f]{2})\z/)
+            errors << "Configured NIC MAC '#{opts[:mac]}' is not in 'xx:xx:xx:xx:xx:xx' format"
           end
         end
 

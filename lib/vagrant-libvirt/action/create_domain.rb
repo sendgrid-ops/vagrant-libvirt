@@ -33,7 +33,10 @@ module VagrantPlugins
           @name = env[:domain_name]
           @uuid = config.uuid
           @cpus = config.cpus.to_i
+          @cpu_features = config.cpu_features
           @cpu_mode = config.cpu_mode
+          @cpu_model = config.cpu_model
+          @cpu_fallback = config.cpu_fallback
           @loader = config.loader
           @machine_type = config.machine_type
           @machine_arch = config.machine_arch
@@ -44,7 +47,9 @@ module VagrantPlugins
           @domain_volume_cache = config.volume_cache
           @kernel = config.kernel
           @cmd_line = config.cmd_line
+          @emulator_path = config.emulator_path
           @initrd = config.initrd
+          @dtb = config.dtb
           @graphics_type = config.graphics_type
           @graphics_autoport = config.graphics_autoport
           @graphics_port = config.graphics_port
@@ -57,6 +62,11 @@ module VagrantPlugins
           @video_type = config.video_type
           @video_vram = config.video_vram
           @keymap = config.keymap
+          @kvm_hidden = config.kvm_hidden
+
+          @tpm_model = config.tpm_model
+          @tpm_type = config.tpm_type
+          @tpm_path = config.tpm_path
 
           # Boot order
           @boot_order = config.boot_order
@@ -68,6 +78,15 @@ module VagrantPlugins
 
           # Input
           @inputs = config.inputs
+
+          # Channels
+          @channels = config.channels
+
+          # PCI device passthrough
+          @pcis = config.pcis
+
+          # USB device passthrough
+          @usbs = config.usbs
 
           config = env[:machine].provider_config
           @domain_type = config.driver
@@ -139,6 +158,9 @@ module VagrantPlugins
           end
           env[:ui].info(" -- Domain type:       #{@domain_type}")
           env[:ui].info(" -- Cpus:              #{@cpus}")
+          @cpu_features.each do |cpu_feature|
+            env[:ui].info(" -- CPU Feature:       name=#{cpu_feature[:name]}, policy=#{cpu_feature[:policy]}")
+          end
           env[:ui].info(" -- Memory:            #{@memory_size / 1024}M")
           env[:ui].info(" -- Management MAC:    #{@management_network_mac}")
           env[:ui].info(" -- Loader:            #{@loader}")
@@ -157,6 +179,7 @@ module VagrantPlugins
           env[:ui].info(" -- Video Type:        #{@video_type}")
           env[:ui].info(" -- Video VRAM:        #{@video_vram}")
           env[:ui].info(" -- Keymap:            #{@keymap}")
+          env[:ui].info(" -- TPM Path:          #{@tpm_path}")
 
           @boot_order.each do |device|
             env[:ui].info(" -- Boot device:        #{device}")
@@ -180,9 +203,29 @@ module VagrantPlugins
           @cdroms.each do |cdrom|
             env[:ui].info(" -- CDROM(#{cdrom[:dev]}):        #{cdrom[:path]}")
           end
+
           @inputs.each do |input|
             env[:ui].info(" -- INPUT:             type=#{input[:type]}, bus=#{input[:bus]}")
           end
+
+          @channels.each do |channel|
+            env[:ui].info(" -- CHANNEL:             type=#{channel[:type]}, mode=#{channel[:source_mode]}")
+            env[:ui].info(" -- CHANNEL:             target_type=#{channel[:target_type]}, target_name=#{channel[:target_name]}")
+          end
+
+          @pcis.each do |pci|
+            env[:ui].info(" -- PCI passthrough:   #{pci[:bus]}:#{pci[:slot]}.#{pci[:function]}")
+          end
+
+          @usbs.each do |usb|
+            usb_dev = []
+            usb_dev.push("bus=#{usb[:bus]}") if usb[:bus]
+            usb_dev.push("device=#{usb[:device]}") if usb[:device]
+            usb_dev.push("vendor=#{usb[:vendor]}") if usb[:vendor]
+            usb_dev.push("product=#{usb[:product]}") if usb[:product]
+            env[:ui].info(" -- USB passthrough:   #{usb_dev.join(', ')}")
+          end
+
           env[:ui].info(" -- Command line : #{@cmd_line}")
 
           # Create libvirt domain.

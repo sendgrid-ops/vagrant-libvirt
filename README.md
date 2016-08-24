@@ -1,4 +1,5 @@
 # Vagrant Libvirt Provider
+[![Build Status](https://travis-ci.org/vagrant-libvirt/vagrant-libvirt.svg)](https://travis-ci.org/vagrant-libvirt/vagrant-libvirt)
 
 This is a [Vagrant](http://www.vagrantup.com) plugin that adds an
 [Libvirt](http://libvirt.org) provider to Vagrant, allowing Vagrant to
@@ -28,6 +29,8 @@ welcome and can help a lot :-)
   	- [Reload behavior](#reload-behavior-1)
 - [CDROMs](#cdroms)
 - [Input](#input)
+- [PCI device passthrough](#pci-device-passthrough)
+- [CPU Features](#cpu-features)
 - [No box and PXE boot](#no-box-and-pxe-boot)
 - [SSH Access To VM](#ssh-access-to-vm)
 - [Forwarded Ports](#forwarded-ports)
@@ -57,13 +60,13 @@ welcome and can help a lot :-)
 
 ## Future work
 
-* Take a look at [open issues](https://github.com/pradels/vagrant-libvirt/issues?state=open).
+* Take a look at [open issues](https://github.com/vagrant-libvirt/vagrant-libvirt/issues?state=open).
 
 ## Installation
 
-First, you should have libvirt installed if you plan to run VMs on your local system. For instructions, refer to your linux distribution's documentation,
+First, you should have both qemu and libvirt installed if you plan to run VMs on your local system. For instructions, refer to your linux distribution's documentation. *Before you start using Vagrant-libvirt, please make sure your libvirt and qemu installation is working correctly and you are able to create qemu or kvm type virtual machines with `virsh` or `virt-manager`.*
 
-Next, you must have [Vagrant installed](http://docs.vagrantup.com/v2/installation/index.html). Vagrant-libvirt supports Vagrant 1.5, 1.6 and 1.7.
+Next, you must have [Vagrant installed](http://docs.vagrantup.com/v2/installation/index.html). Vagrant-libvirt supports Vagrant 1.5, 1.6, 1.7 and 1.8.
 
  Now you're ready to install vagrant-libvirt using standard [Vagrant plugin](http://docs.vagrantup.com/v2/plugins/usage.html) installation methods.
 
@@ -78,12 +81,12 @@ missing development libraries for libxslt, libxml2 and libvirt.
 
 In Ubuntu, Debian, ...
 ```
-$ sudo apt-get install libxslt-dev libxml2-dev libvirt-dev zlib1g-dev
+$ sudo apt-get install libxslt-dev libxml2-dev libvirt-dev zlib1g-dev ruby-dev
 ```
 
 In RedHat, Centos, Fedora, ...
 ```
-# yum install libxslt-devel libxml2-devel libvirt-devel libguestfs-tools-c
+# yum install libxslt-devel libxml2-devel libvirt-devel libguestfs-tools-c ruby-devel
 ```
 
 If have problem with installation - check your linker. It should be ld.gold:
@@ -100,12 +103,14 @@ sudo ln -fs /usr/bin/ld.gold /usr/bin/ld
 After installing the plugin (instructions above), the quickest way to get
 started is to add Libvirt box and specify all the details manually within
 a `config.vm.provider` block. So first, add Libvirt box using any name you
-want. This is just an example of Libvirt CentOS 6.4 box available:
+want. You can find more libvirt ready boxes at https://atlas.hashicorp.com/boxes/search?provider=libvirt
+
+Some examples:
 
 ```
-vagrant box add fedora21 http://citozin.com/fedora21.box
+vagrant init fedora/23-cloud-base
 # or
-vagrant box add centos64 http://citozin.com/centos64.box
+vagrant init centos/7
 ```
 
 ### Create Vagrantfile
@@ -182,12 +187,14 @@ end
 
 ### Domain Specific Options
 
-* `disk_bus` - The type of disk device to emulate. Defaults to virtio if not set. Possible values are documented in libvirt's [description for _target_](http://libvirt.org/formatdomain.html#elementsDisks).
+* `disk_bus` - The type of disk device to emulate. Defaults to virtio if not set. Possible values are documented in libvirt's [description for _target_](http://libvirt.org/formatdomain.html#elementsDisks). NOTE: this option applies only to disks associated with a box image. To set the bus type on additional disks, see the [Additional Disks](#additional-disks) section.
 * `nic_model_type` - parameter specifies the model of the network adapter when you create a domain value by default virtio KVM believe possible values, see the [documentation for libvirt](https://libvirt.org/formatdomain.html#elementsNICSModel).
 * `memory` - Amount of memory in MBytes. Defaults to 512 if not set.
 * `cpus` - Number of virtual cpus. Defaults to 1 if not set.
 * `nested` - [Enable nested virtualization](https://github.com/torvalds/linux/blob/master/Documentation/virtual/kvm/nested-vmx.txt). Default is false.
-* `cpu_mode` - [CPU emulation mode](https://libvirt.org/formatdomain.html#elementsCPU). Defaults to 'host-model' if not set. Allowed values: host-model, host-passthrough.
+* `cpu_mode` - [CPU emulation mode](https://libvirt.org/formatdomain.html#elementsCPU). Defaults to 'host-model' if not set. Allowed values: host-model, host-passthrough, custom.
+* `cpu_model` - CPU Model. Defaults to 'qemu64' if not set. This can really only be used when setting `cpu_mode` to `custom`.
+* `cpu_fallback` - Whether to allow libvirt to fall back to a CPU model close to the specified model if features in the guest CPU are not supported on the host. Defaults to 'allow' if not set. Allowed values: `allow`, `forbid`.
 * `loader` - Sets path to custom UEFI loader.
 * `volume_cache` - Controls the cache mechanism. Possible values are "default", "none", "writethrough", "writeback", "directsync" and "unsafe". [See driver->cache in libvirt documentation](http://libvirt.org/formatdomain.html#elementsDisks).
 * `kernel` - To launch the guest with a kernel residing on host filesystems. Equivalent to qemu `-kernel`.
@@ -196,21 +203,27 @@ end
 * `cmd_line` - Arguments passed on to the guest kernel initramfs or initrd to use. Equivalent to qemu `-append`.
 * `graphics_type` - Sets the protocol used to expose the guest display.  Defaults to `vnc`.  Possible values are "sdl", "curses", "none", "gtk", "vnc" or "spice".
 * `graphics_port` - Sets the port for the display protocol to bind to.  Defaults to 5900.
-* `graphics_ip` - Sets the IP for the display protocol to bind to.  Defaults to "127.0.0.0.1".
+* `graphics_ip` - Sets the IP for the display protocol to bind to.  Defaults to "127.0.0.1".
 * `graphics_passwd` - Sets the password for the display protocol. Working for vnc and spice. by default working without passsword.
 * `graphics_autoport` - Sets autoport for graphics, libvirt in this case ignores graphics_port value, Defaults to 'yes'. Possible value are "yes" and "no"
 * `keymap` - Set keymap for vm. default: en-us
+* `kvm_hidden` - [Hide the hypervisor from the guest](https://libvirt.org/formatdomain.html#elementsFeatures). Useful for GPU passthrough on stubborn drivers. Default is false.
 * `video_type` - Sets the graphics card type exposed to the guest.  Defaults to "cirrus".  [Possible values](http://libvirt.org/formatdomain.html#elementsVideo) are "vga", "cirrus", "vmvga", "xen", "vbox", or "qxl".
 * `video_vram` - Used by some graphics card types to vary the amount of RAM dedicated to video.  Defaults to 9216.
-* `machine` - Sets machine type. Equivalent to qemu `-machine`. Use `qemu-system-x86_64 -machine help` to get a list of supported machines.
+* `machine_type` - Sets machine type. Equivalent to qemu `-machine`. Use `qemu-system-x86_64 -machine help` to get a list of supported machines.
 * `machine_arch` - Sets machine architecture. This helps libvirt to determine the correct emulator type. Possible values depend on your version of qemu. For possible values, see which emulator executable `qemu-system-*` your system provides. Common examples are `aarch64`, `alpha`, `arm`, `cris`, `i386`, `lm32`, `m68k`, `microblaze`, `microblazeel`, `mips`, `mips64`, `mips64el`, `mipsel`, `moxie`, `or32`, `ppc`, `ppc64`, `ppcemb`, `s390x`, `sh4`, `sh4eb`, `sparc`, `sparc64`, `tricore`, `unicore32`, `x86_64`, `xtensa`, `xtensaeb`.
 * `machine_virtual_size` - Sets the disk size in GB for the machine overriding the default specified in the box. Allows boxes to defined with a minimal size disk by default and to be grown to a larger size at creation time. Will ignore sizes smaller than the size specified by the box metadata. Note that currently there is no support for automatically resizing the filesystem to take advantage of the larger disk.
+* `emulator_path` - Explicitly select which device model emulator to use by providing the path, e.g. `/usr/bin/qemu-system-x86_64`. This is especially useful on systems that fail to select it automatically based on `machine_arch` which then results in a capability error.
 * `boot` - Change the boot order and enables the boot menu. Possible options are "hd", "network", "cdrom". Defaults to "hd" with boot menu disabled. When "network" is set without "hd", only all NICs will be tried; see below for more detail.
 * `nic_adapter_count` - Defaults to '8'. Only use case for increasing this count is for VMs that virtualize switches such as Cumulus Linux. Max value for Cumulus Linux VMs is 33.
 * `uuid` - Force a domain UUID. Defaults to autogenerated value by libvirt if not set.
 * `suspend_mode` - What is done on vagrant suspend. Possible values: 'pause', 'managedsave'. Pause mode executes a la `virsh suspend`, which just pauses execution of a VM, not freeing resources. Managed save mode does a la `virsh managedsave` which frees resources suspending a domain.
-
-
+* `tpm_model` - The model of the TPM to which you wish to connect.
+* `tpm_type` - The type of TPM device to which you are connecting.
+* `tpm_path` - The path to the TPM device on the host system.
+* `dtb` - The device tree blob file, mostly used for non-x86 platforms. In case the device tree isn't added in-line to the kernel, it can be manually specified here.
+* `autostart` - Automatically start the domain when the host boots. Defaults to 'false'.
+* `channel` - [libvirt channels](https://libvirt.org/formatdomain.html#elementCharChannel). Configure a private communication channel between the host and guest, e.g. for use by the [qemu guest agent](http://wiki.libvirt.org/page/Qemu_guest_agent) and the Spice/QXL graphics type.
 
 Specific domain settings can be set for each domain separately in multi-VM
 environment. Example below shows a part of Vagrantfile, where specific options
@@ -266,6 +279,9 @@ On vagrant reload the following domain specific attributes are updated in define
 * `keymap` - Updated.
 * `video_type` - Updated.
 * `video_vram` - Updated.
+* `tpm_model` - Updated.
+* `tpm_type` - Updated.
+* `tpm_path` - Updated.
 
 
 ## Networks
@@ -301,26 +317,26 @@ An examples of network interface definitions:
   # Guest 1
   config.vm.define :test_vm1 do |test_vm1|
     test_vm1.vm.network :private_network,
-          :libvirt__tunnel_type => 'server',
-          # default is 127.0.0.1 if omitted
-          # :libvirt__tunnel_ip => '127.0.0.1',
-          :libvirt__tunnel_port => '11111'
+      :libvirt__tunnel_type => 'server',
+      # default is 127.0.0.1 if omitted
+      # :libvirt__tunnel_ip => '127.0.0.1',
+      :libvirt__tunnel_port => '11111'
 
   # Guest 2
   config.vm.define :test_vm2 do |test_vm2|
     test_vm2.vm.network :private_network,
-          :libvirt__tunnel_type => 'client',
-          # default is 127.0.0.1 if omitted
-          # :libvirt__tunnel_ip => '127.0.0.1',
-          :libvirt__tunnel_port => '11111'
+      :libvirt__tunnel_type => 'client',
+      # default is 127.0.0.1 if omitted
+      # :libvirt__tunnel_ip => '127.0.0.1',
+      :libvirt__tunnel_port => '11111'
 
 
   # Public Network
   config.vm.define :test_vm1 do |test_vm1|
     test_vm1.vm.network :public_network,
-          :dev => "virbr0",
-          :mode => "bridge",
-          :type => "bridge"
+      :dev => "virbr0",
+      :mode => "bridge",
+      :type => "bridge"
   end
 ```
 
@@ -395,7 +411,10 @@ starts with 'libvirt__' string. Here is a list of those options:
 * `:libvirt__tunnel_local_ip` - Sets the local IP used by the udp tunnel
     interface type. It populates the ip entry of the `<local address=XXX">` section of
     the interface xml configuration. _(This feature only works in libvirt 1.2.20 and higher)_
-* `:mac` - MAC address for the interface.
+* `:libvirt__guest_ipv6` - Enable or disable guest-to-guest IPv6 communication.
+    See [here](https://libvirt.org/formatnetwork.html#examplesPrivate6), and [here](http://libvirt.org/git/?p=libvirt.git;a=commitdiff;h=705e67d40b09a905cd6a4b8b418d5cb94eaa95a8) for for more information.
+* `:libvirt__iface_name` - Define a name for the private network interface. With this feature one can [simulate physical link failures](https://github.com/vagrant-libvirt/vagrant-libvirt/pull/498)
+* `:mac` - MAC address for the interface. *Note: specify this in lowercase since Vagrant network scripts assume it will be!*
 * `:model_type` - parameter specifies the model of the network adapter when you create a domain value by default virtio KVM believe possible values, see the documentation for libvirt
 
 
@@ -412,6 +431,8 @@ virtual network.
   Default mode is 'bridge'.
 * `:type` - is type of interface.(`<interface type="#{@type}">`)
 * `:mac` - MAC address for the interface.
+* `:network_name` - Name of libvirt network to connect to.
+* `:portgroup` - Name of libvirt portgroup to connect to.
 * `:ovs` - Support to connect to an open vSwitch bridge device. Default is 'false'.
 
 ### Management Network
@@ -424,6 +445,7 @@ configurable at the provider level.
 
 * `management_network_name` - Name of libvirt network to which all VMs will be connected. If not specified the default is 'vagrant-libvirt'.
 * `management_network_address` - Address of network to which all VMs will be connected. Must include the address and subnet mask. If not specified the default is '192.168.121.0/24'.
+* `management_network_guest_ipv6` - Enable or disable guest-to-guest IPv6 communication. See [here](https://libvirt.org/formatnetwork.html#examplesPrivate6), and [here](http://libvirt.org/git/?p=libvirt.git;a=commitdiff;h=705e67d40b09a905cd6a4b8b418d5cb94eaa95a8) for for more information.
 
 You may wonder how vagrant-libvirt knows the IP address a VM received.
 Libvirt doesn't provide a standard way to find out the IP address of a running
@@ -502,6 +524,77 @@ Vagrant.configure("2") do |config|
 end
 ```
 
+## PCI device passthrough
+
+You can specify multiple PCI devices to passthrough to the VM via `libvirt.pci`. Available options are listed below. Note that all options are required:
+
+* `bus` - The bus of the PCI device
+* `slot` - The slot of the PCI device
+* `function` - The function of the PCI device
+
+You can extract that information from output of `lspci` command. First characters of each line are in format `[<bus>]:[<slot>].[<func>]`. Example
+
+```
+$ lspci| grep NVIDIA
+03:00.0 VGA compatible controller: NVIDIA Corporation GK110B [GeForce GTX TITAN Black] (rev a1)
+```
+
+In that case `bus` is `0x03`, `slot` is `0x00` and `function` is `0x0`.
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.provider :libvirt do |libvirt|
+    libvirt.pci :bus => '0x06', :slot => '0x12', :function => '0x5'
+
+    # Add another one if it is neccessary
+    libvirt.pci :bus => '0x03', :slot => '0x00', :function => '0x0'
+  end
+end
+```
+
+## CPU features
+
+You can specify CPU feature policies via `libvirt.cpu_feature`. Available options are
+listed below. Note that both options are required:
+
+* `name` - The name of the feature for the chosen CPU (see libvirts `cpu_map.xml`)
+* `policy` - The policy for this feature (one of `force`, `require`, `optional`, `disable` and `forbid` - see libvirt documentation)
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.provider :libvirt do |libvirt|
+    # The feature will not be supported by virtual CPU.
+    libvirt.cpu_feature :name => 'hypervisor', :policy => 'disable'
+    # Guest creation will fail unless the feature is supported by host CPU.
+    libvirt.cpu_feature :name => 'vmx', :policy => 'require'
+    # The virtual CPU will claim the feature is supported regardless of it being supported by host CPU.
+    libvirt.cpu_feature :name => 'pdpe1gb', :policy => 'force'
+  end
+end
+```
+
+## USB device passthrough
+
+You can specify multiple USB devices to passthrough to the VM via `libvirt.usb`. The device can be specified by the following options:
+
+* `bus` - The USB bus ID, e.g. "1"
+* `device` - The USB device ID, e.g. "2"
+* `vendor` - The USB devices vendor ID (VID), e.g. "0x1234"
+* `product` - The USB devices product ID (PID), e.g. "0xabcd"
+
+At least one of these has to be specified, and `bus` and `device` may only be used together.
+
+The example values above match the device from the following output of `lsusb`:
+
+```
+Bus 001 Device 002: ID 1234:abcd Example device
+```
+
+Additionally, the following options can be used:
+
+* `startupPolicy` - Is passed through to libvirt and controls if the device has to exist.
+                    libvirt currently allows the following values: "mandatory", "requisite", "optional".
+
 ## No box and PXE boot
 
 There is support for PXE booting VMs with no disks as well as PXE booting VMs with blank disks. There are some limitations:
@@ -554,6 +647,8 @@ you want the forwarded port to be accessible from outside the Vagrant
 host.  In this case you should also set the `host_ip` option to `'*'`
 since it defaults to `'localhost'`.
 
+You can also provide a custom adapter to forward from by 'adapter' option. Default is 'eth0'.
+
 ## Synced Folders
 
 vagrant-libvirt supports bidirectional synced folders via nfs or 9p and
@@ -569,6 +664,12 @@ it an setting the type, e.g.
     or
 
     config.vm.synced_folder './', '/vagrant', type: '9p', disabled: false, accessmode: "squash", owner: "vagrant"
+
+    or
+
+    config.vm.synced_folder './', '/vagrant', type: '9p', disabled: false, accessmode: "mapped", mount: false
+
+For 9p shares, a `mount: false` option allows to define synced folders without mounting them at boot.
 
 **SECURITY NOTE:** for remote libvirt, nfs synced folders requires a bridged public network interface and you must connect to libvirt via ssh.
 
@@ -591,9 +692,97 @@ Vagrant.configure("2") do |config|
 end
 ```
 
+## TPM Devices
+
+Modern versions of Libvirt support connecting to TPM devices on the host
+system. This allows you to enable Trusted Boot Extensions, among other
+features, on your guest VMs.
+
+In general, you will only need to modify the `tpm_path` variable in your guest
+configuration. However, advanced usage, such as the application of a Software
+TPM, may require modifying the `tpm_model` and `tpm_type` variables.
+
+The TPM options will only be used if you specify a TPM path. Declarations of
+any TPM options without specifying a path will result in those options being
+ignored.
+
+Here is an example of using the TPM options:
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.provider :libvirt do |libvirt|
+    libvirt.tpm_model = 'tpm-tis'
+    libvirt.tpm_type = 'passthrough'
+    libvirt.tpm_path = '/dev/tpm0'
+  end
+end
+```
+
+## Libvirt communication channels
+
+For certain functionality to be available within a guest, a private
+communication channel must be established with the host. Two notable examples of
+this are the qemu guest agent, and the Spice/QXL graphics type.
+
+Below is a simple example which exposes a virtio serial channel to the guest. Note: in a multi-VM environment, the channel would be created for all VMs.
+
+```ruby
+vagrant.configure(2) do |config|
+  config.vm.provider :libvirt do |libvirt|
+    libvirt.channel :type => 'unix', :target_name => 'org.qemu.guest_agent.0', :target_type => 'virtio'
+  end
+end
+```
+
+Below is the syntax for creating a spicevmc channel for use by a qxl graphics card.
+
+```ruby
+vagrant.configure(2) do |config|
+  config.vm.provider :libvirt do |libvirt|
+	libvirt.channel :type => 'spicevmc', :target_name => 'com.redhat.spice.0', :target_type => 'virtio'
+  end
+end
+```
+
+These settings can be specified on a per-VM basis, however the per-guest settings will OVERRIDE any global 'config' setting. In the following example, we create 3 VM with the following configuration:
+
+master: No channel settings specified, so we default to the provider setting of a single virtio guest agent channel.
+node1: Override the channel setting, setting both the guest agent channel, and a spicevmc channel
+node2: Override the channel setting, setting both the guest agent channel, and a 'guestfwd' channel. TCP traffic sent by the guest to the given IP address and port is forwarded to the host socket /tmp/foo. Note: this device must be unique for each VM.
+
+Example
+
+```ruby
+Vagrant.configure(2) do |config|
+  config.vm.box = "fedora/23-cloud-base"
+  config.vm.provider :libvirt do |libvirt|
+    libvirt.channel :type => 'unix', :target_name => 'org.qemu.guest_agent.0', :target_type => 'virtio'
+  end 
+
+  config.vm.define "master" do |master|
+    master.vm.provider :libvirt do |domain|
+        domain.memory = 1024
+    end 
+  end 
+  config.vm.define "node1" do |node1|
+    node1.vm.provider :libvirt do |domain|
+      domain.channel :type => 'unix', :target_name => 'org.qemu.guest_agent.0', :target_type => 'virtio'
+      domain.channel :type => 'spicevmc', :target_name => 'com.redhat.spice.0', :target_type => 'virtio'
+    end 
+  end 
+  config.vm.define "node2" do |node2|
+    node2.vm.provider :libvirt do |domain|
+      domain.channel :type => 'unix', :target_name => 'org.qemu.guest_agent.0', :target_type => 'virtio'
+      domain.channel :type => 'unix', :target_type => 'guestfwd', :target_address => '192.0.2.42', :target_port => '4242',
+                     :source_path => '/tmp/foo'
+    end 
+  end 
+end
+```
+
 ## Box Format
 
-You can view an example box in the [example_box/directory](https://github.com/pradels/vagrant-libvirt/tree/master/example_box). That directory also contains instructions on how to build a box.
+You can view an example box in the [example_box/directory](https://github.com/vagrant-libvirt/vagrant-libvirt/tree/master/example_box). That directory also contains instructions on how to build a box.
 
 The box is a tarball containing:
 
@@ -616,15 +805,15 @@ To work on the `vagrant-libvirt` plugin, clone this repository out, and use
 [Bundler](http://gembundler.com) to get the dependencies:
 
 ```
-$ git clone https://github.com/pradels/vagrant-libvirt.git
+$ git clone https://github.com/vagrant-libvirt/vagrant-libvirt.git
 $ cd vagrant-libvirt
 $ bundle install
 ```
 
-Once you have the dependencies, verify the unit tests pass with `rake`:
+Once you have the dependencies, verify the unit tests pass with `rspec`:
 
 ```
-$ bundle exec rake
+$ bundle exec rspec spec/
 ```
 
 If those pass, you're ready to start developing the plugin. You can test

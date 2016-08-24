@@ -69,6 +69,7 @@ module VagrantPlugins
             @network_name = iface_configuration[:network_name]
             @mac = iface_configuration.fetch(:mac, false)
             @model_type = iface_configuration.fetch(:model_type, @nic_model_type)
+	    @device_name = iface_configuration.fetch(:iface_name, false)
             template_name = 'interface'
             # Configuration for public interfaces which use the macvtap driver
             if iface_configuration[:iface_type] == :public_network
@@ -76,6 +77,8 @@ module VagrantPlugins
               @mode = iface_configuration.fetch(:mode, 'bridge')
               @type = iface_configuration.fetch(:type, 'direct')
               @model_type = iface_configuration.fetch(:model_type, @nic_model_type)
+              @portgroup = iface_configuration.fetch(:portgroup, nil)
+              @network_name = iface_configuration.fetch(:network_name, @network_name)
               template_name = 'public_interface'
               @logger.info("Setting up public interface using device #{@device} in mode #{@mode}")
               @ovs = iface_configuration.fetch(:ovs, false)
@@ -96,7 +99,7 @@ module VagrantPlugins
               else
                 default_ip = '127.0.0.1'
               end
-              @tunnel_ip = iface_configuration.fetch(:tunnel_address, default_ip)
+              @tunnel_ip = iface_configuration.fetch(:tunnel_ip, default_ip)
               @model_type = iface_configuration.fetch(:model_type, @nic_model_type)
               template_name = 'tunnel_interface'
               @logger.info("Setting up #{@type} tunnel interface using  #{@tunnel_ip} port #{@tunnel_port}")
@@ -124,6 +127,8 @@ module VagrantPlugins
               if iface_configuration[:iface_type] == :public_network
                 if @type == 'direct'
                   @mac = xml.xpath("/domain/devices/interface[source[@dev='#{@device}']]/mac/@address")
+                elsif !@portgroup.nil?
+                  @mac = xml.xpath("/domain/devices/interface[source[@network='#{@network_name}']]/mac/@address")
                 else
                   @mac = xml.xpath("/domain/devices/interface[source[@bridge='#{@device}']]/mac/@address")
                 end
@@ -162,6 +167,7 @@ module VagrantPlugins
                   :type    => :static,
                   :ip      => options[:ip],
                   :netmask => options[:netmask],
+                  :gateway => options[:gateway],
                 }.merge(network)
               else
                 network[:type] = :dhcp

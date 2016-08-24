@@ -23,8 +23,8 @@ module VagrantPlugins
 
             libvirt_domain =  env[:machine].provider.driver.connection.client.lookup_domain_by_uuid(env[:machine].id)
 
-            if config.memory*1024 != libvirt_domain.max_memory
-              libvirt_domain.max_memory = config.memory*1024
+            if config.memory.to_i*1024 != libvirt_domain.max_memory
+              libvirt_domain.max_memory = config.memory.to_i*1024
               libvirt_domain.memory = libvirt_domain.max_memory
             end
             begin
@@ -88,7 +88,16 @@ module VagrantPlugins
                   descr_changed = true
                   cpu_model = REXML::Element.new('model', REXML::XPath.first(xml_descr,'/domain/cpu'))
                   cpu_model.attributes['fallback'] = 'allow'
-                  cpu_model.text = 'qemu64'
+                  cpu_model.text = config.cpu_model
+                else
+                  if cpu_model.text != config.cpu_model
+                    descr_changed = true
+                    cpu_model.text = config.cpu_model
+                  end
+                  if cpu_model.attributes['fallback'] != config.cpu_fallback
+                    descr_changed = true
+                    cpu_model.attributes['fallback'] = config.cpu_fallback
+                  end
                 end
                 vmx_feature = REXML::XPath.first(xml_descr,'/domain/cpu/feature[@name="vmx"]')
                 svm_feature = REXML::XPath.first(xml_descr,'/domain/cpu/feature[@name="svm"]')
@@ -126,42 +135,137 @@ module VagrantPlugins
 
               # Graphics
               graphics = REXML::XPath.first(xml_descr,'/domain/devices/graphics')
-              if graphics.attributes['type'] != config.graphics_type
-                descr_changed = true
-                graphics.attributes['type'] = config.graphics_type
-              end
-              if graphics.attributes['listen'] != config.graphics_ip
-                descr_changed = true
-                graphics.attributes['listen'] = config.graphics_ip
-                graphics.delete_element('//listen')
-              end
-              if graphics.attributes['autoport'] != config.graphics_autoport
-                descr_changed = true
-                graphics.attributes['autoport'] = config.graphics_autoport
-                if config.graphics_autoport == 'no'
-                  graphics.attributes['port'] = config.graphics_port
+              if config.graphics_type != 'none'
+                if graphics.nil? 
+                  descr_changed = true
+                  graphics = REXML::Element.new('graphics', REXML::XPath.first(xml_descr,'/domain/devices'))
                 end
+                if graphics.attributes['type'] != config.graphics_type
+                  descr_changed = true
+                  graphics.attributes['type'] = config.graphics_type
+                end
+                if graphics.attributes['listen'] != config.graphics_ip
+                  descr_changed = true
+                  graphics.attributes['listen'] = config.graphics_ip
+                  graphics.delete_element('//listen')
+                end
+                if graphics.attributes['autoport'] != config.graphics_autoport
+                  descr_changed = true
+                  graphics.attributes['autoport'] = config.graphics_autoport
+                  if config.graphics_autoport == 'no'
+                    graphics.attributes['port'] = config.graphics_port
+                  end
+                end
+                if graphics.attributes['keymap'] != config.keymap
+                  descr_changed = true
+                  graphics.attributes['keymap'] = config.keymap
+                end
+                if graphics.attributes['passwd'] != config.graphics_passwd
+                  descr_changed = true
+                  if config.graphics_passwd.nil?
+                    graphics.attributes.delete 'passwd'
+                  else
+                    graphics.attributes['passwd'] = config.graphics_passwd
+                  end
+                end
+              else 
+               # graphics_type = none, remove entire element
+               if !graphics.nil?
+                  graphics.parent.delete_element(graphics)
+               end
               end
-              if graphics.attributes['keymap'] != config.keymap
-                descr_changed = true
-                graphics.attributes['keymap'] = config.keymap
-              end
-              if graphics.attributes['passwd'] != config.graphics_passwd
-                descr_changed = true
-                if config.graphics_passwd.nil?
-                  graphics.attributes.delete 'passwd'
+
+              #TPM
+              if config.tpm_path
+                raise Errors::FogCreateServerError, "The TPM Path must be fully qualified" unless config.tpm_path[0].chr == '/'
+
+                tpm = REXML::XPath.first(xml_descr,'/domain/devices/tpm')
+                if tpm.nil?
+                  descr_changed = true
+                  tpm = REXML::Element.new('tpm', REXML::XPath.first(xml_descr,'/domain/devices/tpm/model'))
+                  tpm.attributes['model'] = config.tpm_model
+                  tpm_backend_type = tpm.add_element('backend')
+                  tpm_backend_type.attributes['type'] = config.tpm_type
+                  tpm_device_path = tpm_backend_type.add_element('device')
+                  tpm_device_path.attributes['path'] = config.tpm_path
                 else
-                  graphics.attributes['passwd'] = config.graphics_passwd
+                  if tpm.attributes['model'] != config.tpm_model
+                    descr_changed = true
+                    tpm.attributes['model'] = config.tpm_model
+                  end
+                  if tpm.elements['backend'].attributes['type'] != config.tpm_type
+                    descr_changed = true
+                    tpm.elements['backend'].attributes['type'] = config.tpm_type
+                  end
+                  if tpm.elements['backend'].elements['device'].attributes['path'] != config.tpm_path
+                    descr_changed = true
+                    tpm.elements['backend'].elements['device'].attributes['path'] = config.tpm_path
+                  end
                 end
               end
 
               # Video device
-              video = REXML::XPath.first(xml_descr,'/domain/devices/video/model')
-              if video.attributes['type'] != config.video_type || video.attributes['vram'] != config.video_vram
+              video = REXML::XPath.first(xml_descr,'/domain/devices/video')
+              if !video.nil? and config.graphics_type == 'none'
+                # graphics_type = none, video devices are removed since there is no possible output
                 descr_changed = true
-                video.attributes.each_attribute {|attr| video.attributes.delete attr}
-                video.attributes['type'] = config.video_type
-                video.attributes['vram'] = config.video_vram
+                video.parent.delete_element(video)
+              else
+                video_model = REXML::XPath.first(xml_descr,'/domain/devices/video/model')
+                if video_model.nil?
+                  video_model = REXML::Element.new('model', REXML::XPath.first(xml_descr,'/domain/devices/video'))
+                  video_model.attributes['type'] = config.video_type
+                  video_model.attributes['vram'] = config.video_vram
+                else
+                  if video_model.attributes['type'] != config.video_type || video_model.attributes['vram'] != config.video_vram
+                    descr_changed = true
+                    video_model.attributes['type'] = config.video_type
+                    video_model.attributes['vram'] = config.video_vram
+                  end
+                end
+              end
+
+              # dtb
+              if config.dtb
+                dtb = REXML::XPath.first(xml_descr,'/domain/os/dtb')
+                if dtb.nil?
+                  descr_changed = true
+                  dtb = REXML::Element.new('dtb', REXML::XPath.first(xml_descr,'/domain/os'))
+                  dtb.text = config.dtb
+                else
+                  if dtb.text != config.dtb
+                    descr_changed = true
+                    dtb.text = config.dtb
+                  end
+                end
+              end
+
+              # kernel and initrd
+              if config.kernel
+                kernel= REXML::XPath.first(xml_descr,'/domain/os/kernel')
+                if kernel.nil?
+                  descr_changed = true
+                  kernel = REXML::Element.new('kernel', REXML::XPath.first(xml_descr,'/domain/os'))
+                  kernel.text = config.kernel
+                else
+                  if kernel.text != config.kernel
+                    descr_changed = true
+                    kernel.text = config.kernel
+                  end
+                end
+              end
+              if config.initrd
+                initrd = REXML::XPath.first(xml_descr,'/domain/os/initrd')
+                if initrd.nil?
+                  descr_changed = true
+                  initrd = REXML::Element.new('initrd', REXML::XPath.first(xml_descr,'/domain/os'))
+                  initrd.text = config.initrd
+                else
+                  if initrd.text != config.initrd
+                    descr_changed = true
+                    initrd.text = config.initrd
+                  end
+                end
               end
 
               # Apply
@@ -179,6 +283,8 @@ module VagrantPlugins
             rescue => e
               env[:ui].error("Error when updating domain settings: #{e.message}")
             end
+            # Autostart with host if enabled in Vagrantfile
+            libvirt_domain.autostart = config.autostart
             # Actually start the domain
             domain.start
           rescue => e
