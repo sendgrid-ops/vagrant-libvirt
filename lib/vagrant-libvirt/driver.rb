@@ -1,16 +1,17 @@
 require 'fog/libvirt'
+require 'libvirt'
 require 'log4r'
 
 module VagrantPlugins
   module ProviderLibvirt
     class Driver
-
       # store the connection at the process level
       #
       # possibly this should be a connection pool using the connection
       # settings as a key to allow per machine connection attributes
       # to be used.
       @@connection = nil
+      @@system_connection = nil
 
       def initialize(machine)
         @logger = Log4r::Logger.new('vagrant_libvirt::driver')
@@ -34,7 +35,7 @@ module VagrantPlugins
 
         # Setup command for retrieving IP address for newly created machine
         # with some MAC address. Get it from dnsmasq leases table
-        ip_command = %q[ awk "/$mac/ {print \$1}" /proc/net/arp ]
+        ip_command = %q( awk "/$mac/ {print \$1}" /proc/net/arp )
         conn_attr[:libvirt_ip_command] = ip_command
 
         @logger.info("Connecting to Libvirt (#{uri}) ...")
@@ -42,10 +43,21 @@ module VagrantPlugins
           @@connection = Fog::Compute.new(conn_attr)
         rescue Fog::Errors::Error => e
           raise Errors::FogLibvirtConnectionError,
-            :error_message => e.message
+                error_message: e.message
         end
 
         @@connection
+      end
+
+      def system_connection
+        # If already connected to libvirt, just use it and don't connect
+        # again.
+        return @@system_connection if @@system_connection
+
+        config = @machine.provider_config
+
+        @@system_connection = Libvirt::open_read_only(config.system_uri)
+        @@system_connection
       end
 
       def get_domain(mid)
@@ -71,6 +83,9 @@ module VagrantPlugins
       def get_ipaddress(machine)
         # Find the machine
         domain = get_domain(machine.id)
+        if @machine.provider_config.qemu_use_session
+          return get_ipaddress_system domain.mac
+        end
 
         if domain.nil?
           # The machine can't be found
@@ -81,23 +96,36 @@ module VagrantPlugins
         ip_address = nil
         begin
           domain.wait_for(2) do
-            addresses.each_pair do |type, ip|
+            addresses.each_pair do |_type, ip|
               # Multiple leases are separated with a newline, return only
               # the most recent address
-              ip_address = ip[0].split("\n").first if ip[0] != nil
+              ip_address = ip[0].split("\n").first unless ip[0].nil?
             end
-            ip_address != nil
+            !ip_address.nil?
           end
         rescue Fog::Errors::TimeoutError
-          @logger.info("Timeout at waiting for an ip address for machine %s" % machine.name)
+          @logger.info('Timeout at waiting for an ip address for machine %s' % machine.name)
         end
 
-        if not ip_address
-          @logger.info("No arp table entry found for machine %s" % machine.name)
+        unless ip_address
+          @logger.info('No arp table entry found for machine %s' % machine.name)
           return nil
         end
 
         ip_address
+      end
+
+      def get_ipaddress_system(mac)
+        ip_address = nil
+
+        system_connection.list_all_networks.each do |net|
+          leases = net.dhcp_leases(mac, 0)
+          # Assume the lease expiring last is the current IP address
+          ip_address = leases.sort_by { |lse| lse["expirytime"] }.last["ipaddr"] if !leases.empty?
+          break if ip_address
+        end
+
+        return ip_address
       end
 
       def state(machine)
@@ -110,11 +138,9 @@ module VagrantPlugins
         end
 
         # TODO: terminated no longer appears to be a valid fog state, remove?
-        if domain.nil? || domain.state.to_sym == :terminated
-          return :not_created
-        end
+        return :not_created if domain.nil? || domain.state.to_sym == :terminated
 
-        return domain.state.gsub("-", "_").to_sym
+        domain.state.tr('-', '_').to_sym
       end
     end
   end

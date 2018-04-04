@@ -54,6 +54,8 @@ en:
       ignoring_virtual_size_too_small: |-
         Ignoring requested virtual disk size of '%{requested}' as it is below
         the minimum box image size of '%{minimum}'.
+      forwarding_udp: |-
+        Forwarding UDP ports is not supported. Ignoring.
 
     errors:
       package_not_supported: No support for package with libvirt. Create box manually.
@@ -76,8 +78,9 @@ en:
       no_domain_volume: |-
         Volume for domain is missing. Try to run 'vagrant up' again.
       interface_slot_not_available: |-
-        Interface adapter number is already in use. Please specify other adapter
-        number.
+        Interface adapter number is already in use. Please specify other adapter number.
+      interface_slot_exhausted: |-
+        Available interface adapters have been exhausted. Please increase the nic_adapter_count.
       rsync_error: |-
         There was an error when attempting to rsync a share folder.
         Please inspect the error message below for more info.
@@ -104,6 +107,8 @@ en:
         `vagrant up` command again.
       creating_storage_pool_error: |-
         There was error while creating libvirt storage pool: %{error_message}
+      creating_volume_error: |-
+        There was error while creating libvirt volume: %{error_message}
       image_upload_error: |-
         Error while uploading image to storage pool: %{error_message}
       no_domain_error: |-
@@ -137,6 +142,9 @@ en:
         Error while deleting snapshot: %{error_message}.
       tunnel_port_not_defined: |-
          tunnel UDP or TCP port not defined.
+      management_network_required: |-
+        Management network can't be disabled when VM use box.
+        Please fix your configuration and run vagrant again.
 
     states:
       paused: |-

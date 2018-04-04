@@ -12,7 +12,7 @@ module VagrantPlugins
         end
 
         def _disk_name(name, disk)
-          "#{name}-#{disk[:device]}.#{disk[:type]}"	# disk name
+          "#{name}-#{disk[:device]}.#{disk[:type]}" # disk name
         end
 
         def _disks_print(disks)
@@ -34,15 +34,22 @@ module VagrantPlugins
           @uuid = config.uuid
           @cpus = config.cpus.to_i
           @cpu_features = config.cpu_features
+          @cpu_topology = config.cpu_topology
+          @features = config.features
+          @features_hyperv = config.features_hyperv
           @cpu_mode = config.cpu_mode
           @cpu_model = config.cpu_model
           @cpu_fallback = config.cpu_fallback
+          @numa_nodes = config.numa_nodes
           @loader = config.loader
+          @nvram = config.nvram
           @machine_type = config.machine_type
           @machine_arch = config.machine_arch
           @disk_bus = config.disk_bus
+          @disk_device = config.disk_device
           @nested = config.nested
           @memory_size = config.memory.to_i * 1024
+          @memory_backing = config.memory_backing
           @management_network_mac = config.management_network_mac
           @domain_volume_cache = config.volume_cache
           @kernel = config.kernel
@@ -54,12 +61,13 @@ module VagrantPlugins
           @graphics_autoport = config.graphics_autoport
           @graphics_port = config.graphics_port
           @graphics_ip = config.graphics_ip
-          @graphics_passwd =  if config.graphics_passwd.to_s.empty?
-                                ''
-                              else
-                                "passwd='#{config.graphics_passwd}'"
+          @graphics_passwd = if config.graphics_passwd.to_s.empty?
+                               ''
+                             else
+                               "passwd='#{config.graphics_passwd}'"
                               end
           @video_type = config.video_type
+          @sound_type = config.sound_type
           @video_vram = config.video_vram
           @keymap = config.keymap
           @kvm_hidden = config.kvm_hidden
@@ -85,8 +93,24 @@ module VagrantPlugins
           # PCI device passthrough
           @pcis = config.pcis
 
+          # Watchdog device
+          @watchdog_dev = config.watchdog_dev
+
+          # USB controller
+          @usbctl_dev = config.usbctl_dev
+
           # USB device passthrough
           @usbs = config.usbs
+
+          # Redirected devices
+          @redirdevs = config.redirdevs
+          @redirfilters = config.redirfilters
+
+          # smartcard device
+          @smartcard_dev = config.smartcard_dev
+
+          # RNG device passthrough
+          @rng = config.rng
 
           config = env[:machine].provider_config
           @domain_type = config.driver
@@ -100,7 +124,8 @@ module VagrantPlugins
                 x.pool_name == @storage_pool_name
               end
             domain_volume = ProviderLibvirt::Util::Collection.find_matching(
-              actual_volumes,"#{@name}.img")
+              actual_volumes, "#{@name}.img"
+            )
             raise Errors::DomainVolumeExists if domain_volume.nil?
             @domain_volume_path = domain_volume.path
           end
@@ -108,13 +133,15 @@ module VagrantPlugins
           # If we have a box, take the path from the domain volume and set our storage_prefix.
           # If not, we dump the storage pool xml to get its defined path.
           # the default storage prefix is typically: /var/lib/libvirt/images/
-          if env[:machine].config.vm.box
-            storage_prefix = File.dirname(@domain_volume_path) + '/'        # steal
-          else
-            storage_pool = env[:machine].provider.driver.connection.client.lookup_storage_pool_by_name(@storage_pool_name)
-            raise Errors::NoStoragePool if storage_pool.nil?
-            xml = Nokogiri::XML(storage_pool.xml_desc)
-            storage_prefix = xml.xpath("/pool/target/path").inner_text.to_s + '/'
+          if !config.qemu_use_session
+            if env[:machine].config.vm.box
+              storage_prefix = File.dirname(@domain_volume_path) + '/' # steal
+            else
+              storage_pool = env[:machine].provider.driver.connection.client.lookup_storage_pool_by_name(@storage_pool_name)
+              raise Errors::NoStoragePool if storage_pool.nil?
+              xml = Nokogiri::XML(storage_pool.xml_desc)
+              storage_prefix = xml.xpath('/pool/target/path').inner_text.to_s + '/'
+            end
           end
 
           @disks.each do |disk|
@@ -140,10 +167,11 @@ module VagrantPlugins
                   path: disk[:absolute_path],
                   capacity: disk[:size],
                   #:allocation => ?,
-                  pool_name: @storage_pool_name)
+                  pool_name: @storage_pool_name
+                )
               rescue Fog::Errors::Error => e
                 raise Errors::FogDomainVolumeCreateError,
-                    error_message:  e.message
+                      error_message: e.message
               end
             else
               disk[:preexisting] = true
@@ -153,17 +181,28 @@ module VagrantPlugins
           # Output the settings we're going to use to the user
           env[:ui].info(I18n.t('vagrant_libvirt.creating_domain'))
           env[:ui].info(" -- Name:              #{@name}")
-          if @uuid != ''
-            env[:ui].info(" -- Forced UUID:       #{@uuid}")
-          end
+          env[:ui].info(" -- Forced UUID:       #{@uuid}") if @uuid != ''
           env[:ui].info(" -- Domain type:       #{@domain_type}")
           env[:ui].info(" -- Cpus:              #{@cpus}")
+          if not @cpu_topology.empty?
+            env[:ui].info(" -- CPU topology:   sockets=#{@cpu_topology[:sockets]}, cores=#{@cpu_topology[:cores]}, threads=#{@cpu_topology[:threads]}")
+          end
           @cpu_features.each do |cpu_feature|
             env[:ui].info(" -- CPU Feature:       name=#{cpu_feature[:name]}, policy=#{cpu_feature[:policy]}")
           end
+          @features.each do |feature|
+            env[:ui].info(" -- Feature:           #{feature}")
+          end
+          @features_hyperv.each do |feature|
+            env[:ui].info(" -- Feature (HyperV):  name=#{feature[:name]}, state=#{feature[:state]}")
+          end
           env[:ui].info(" -- Memory:            #{@memory_size / 1024}M")
+          @memory_backing.each do |backing|
+            env[:ui].info(" -- Memory Backing:    #{backing[:name]}: #{backing[:config].map { |k,v| "#{k}='#{v}'"}.join(' ')}")
+          end
           env[:ui].info(" -- Management MAC:    #{@management_network_mac}")
           env[:ui].info(" -- Loader:            #{@loader}")
+          env[:ui].info(" -- Nvram:             #{@nvram}")
           if env[:machine].config.vm.box
             env[:ui].info(" -- Base box:          #{env[:machine].box.name}")
           end
@@ -178,6 +217,7 @@ module VagrantPlugins
           env[:ui].info(" -- Graphics Password: #{@graphics_passwd.empty? ? 'Not defined' : 'Defined'}")
           env[:ui].info(" -- Video Type:        #{@video_type}")
           env[:ui].info(" -- Video VRAM:        #{@video_vram}")
+          env[:ui].info(" -- Sound Type:	#{@sound_type}")
           env[:ui].info(" -- Keymap:            #{@keymap}")
           env[:ui].info(" -- TPM Path:          #{@tpm_path}")
 
@@ -185,18 +225,19 @@ module VagrantPlugins
             env[:ui].info(" -- Boot device:        #{device}")
           end
 
-          if @disks.length > 0
+          unless @disks.empty?
             env[:ui].info(" -- Disks:         #{_disks_print(@disks)}")
           end
 
           @disks.each do |disk|
             msg = " -- Disk(#{disk[:device]}):     #{disk[:absolute_path]}"
-            msg += ' (shared. Remove only manually)' if disk[:allow_existing]
+            msg += ' Shared' if disk[:shareable]
+            msg += ' (Remove only manually)' if disk[:allow_existing]
             msg += ' Not created - using existed.' if disk[:preexisting]
             env[:ui].info(msg)
           end
 
-          if @cdroms.length > 0
+          unless @cdroms.empty?
             env[:ui].info(" -- CDROMS:            #{_cdroms_print(@cdroms)}")
           end
 
@@ -217,6 +258,20 @@ module VagrantPlugins
             env[:ui].info(" -- PCI passthrough:   #{pci[:bus]}:#{pci[:slot]}.#{pci[:function]}")
           end
 
+          unless @rng[:model].nil?
+            env[:ui].info(" -- RNG device model:  #{@rng[:model]}")
+          end
+
+          if not @watchdog_dev.empty?
+            env[:ui].info(" -- Watchdog device:   model=#{@watchdog_dev[:model]}, action=#{@watchdog_dev[:action]}")
+          end
+
+          if not @usbctl_dev.empty?
+            msg = " -- USB controller:    model=#{@usbctl_dev[:model]}"
+            msg += ", ports=#{@usbctl_dev[:ports]}" if @usbctl_dev[:ports]
+            env[:ui].info(msg)
+          end
+
           @usbs.each do |usb|
             usb_dev = []
             usb_dev.push("bus=#{usb[:bus]}") if usb[:bus]
@@ -226,16 +281,50 @@ module VagrantPlugins
             env[:ui].info(" -- USB passthrough:   #{usb_dev.join(', ')}")
           end
 
-          env[:ui].info(" -- Command line : #{@cmd_line}")
+          unless @redirdevs.empty?
+            env[:ui].info(' -- Redirected Devices: ')
+            @redirdevs.each do |redirdev|
+              msg = "    -> bus=usb, type=#{redirdev[:type]}"
+              env[:ui].info(msg)
+            end
+          end
+
+          unless @redirfilters.empty?
+            env[:ui].info(' -- USB Device filter for Redirected Devices: ')
+            @redirfilters.each do |redirfilter|
+              msg = "    -> class=#{redirfilter[:class]}, "
+              msg += "vendor=#{redirfilter[:vendor]}, "
+              msg += "product=#{redirfilter[:product]}, "
+              msg += "version=#{redirfilter[:version]}, "
+              msg += "allow=#{redirfilter[:allow]}"
+              env[:ui].info(msg)
+            end
+          end
+
+          if not @smartcard_dev.empty?
+            env[:ui].info(" -- smartcard device:  mode=#{@smartcard_dev[:mode]}, type=#{@smartcard_dev[:type]}")
+          end
+
+          @qargs = config.qemu_args
+          if not @qargs.empty?
+            env[:ui].info(' -- Command line args: ')
+            @qargs.each do |arg|
+              msg = "    -> value=#{arg[:value]}, "
+              env[:ui].info(msg)
+            end
+          end
+
+          env[:ui].info(" -- Command line : #{@cmd_line}") unless @cmd_line.empty?
 
           # Create libvirt domain.
           # Is there a way to tell fog to create new domain with already
           # existing volume? Use domain creation from template..
           begin
             server = env[:machine].provider.driver.connection.servers.create(
-              xml: to_xml('domain'))
+              xml: to_xml('domain')
+            )
           rescue Fog::Errors::Error => e
-            raise Errors::FogCreateServerError, error_message:  e.message
+            raise Errors::FogCreateServerError, error_message: e.message
           end
 
           # Immediately save the ID since it is created at this point.

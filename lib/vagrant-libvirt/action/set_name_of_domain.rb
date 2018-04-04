@@ -2,11 +2,10 @@ require 'digest'
 module VagrantPlugins
   module ProviderLibvirt
     module Action
-
       # Setup name for domain and domain volumes.
       class SetNameOfDomain
-        def initialize(app, env)
-          @logger = Log4r::Logger.new("vagrant_libvirt::action::set_name_of_domain")
+        def initialize(app, _env)
+          @logger = Log4r::Logger.new('vagrant_libvirt::action::set_name_of_domain')
           @app    = app
         end
 
@@ -14,14 +13,15 @@ module VagrantPlugins
           env[:domain_name] = build_domain_name(env)
 
           begin
-            @logger.info("Looking for domain #{env[:domain_name]} through list " +
+            @logger.info("Looking for domain #{env[:domain_name]} through list " \
                          "#{env[:machine].provider.driver.connection.servers.all}")
             # Check if the domain name is not already taken
 
             domain = ProviderLibvirt::Util::Collection.find_matching(
-              env[:machine].provider.driver.connection.servers.all, env[:domain_name])
+              env[:machine].provider.driver.connection.servers.all, env[:domain_name]
+            )
           rescue Fog::Errors::Error => e
-            @logger.info("#{e}")
+            @logger.info(e.to_s)
             domain = nil
           end
 
@@ -29,7 +29,7 @@ module VagrantPlugins
 
           unless domain.nil?
             raise ProviderLibvirt::Errors::DomainNameExists,
-              :domain_name => env[:domain_name]
+                  domain_name: env[:domain_name]
           end
 
           @app.call(env)
@@ -46,12 +46,12 @@ module VagrantPlugins
           config = env[:machine].provider_config
           domain_name =
             if config.default_prefix.nil?
-              env[:root_path].basename.to_s.dup.concat("_")
+              env[:root_path].basename.to_s.dup.concat('_')
             elsif config.default_prefix.empty?
               # don't have any prefix, not even "_"
-              ""
+              ''
             else
-              config.default_prefix.to_s.concat("_")
+              config.default_prefix.to_s.dup.concat('_')
             end
           domain_name << env[:machine].name.to_s
           domain_name.gsub!(/[^-a-z0-9_]/i, '')
@@ -62,9 +62,7 @@ module VagrantPlugins
           end
           domain_name
         end
-
       end
-
     end
   end
 end

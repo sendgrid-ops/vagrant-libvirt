@@ -19,6 +19,7 @@ module VagrantPlugins
       def self.action_up
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
+          b.use BoxCheckOutdated
           b.use Call, IsCreated do |env, b2|
             # Create VM if not yet created.
             if !env[:result]
@@ -54,6 +55,7 @@ module VagrantPlugins
                 # b2.use SyncFolders
               end
             else
+              env[:halt_on_error] = true
               b2.use action_start
             end
           end
@@ -67,12 +69,16 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsRunning do |env, b2|
-            # If the VM is running, then our work here is done, exit
-            next if env[:result]
+            # If the VM is running, run the necessary provisioners
+            if env[:result]
+              b2.use action_provision
+              next
+            end
 
             b2.use Call, IsSuspended do |env2, b3|
               # if vm is suspended resume it then exit
               if env2[:result]
+                b3.use CreateNetworks
                 b3.use ResumeDomain
                 next
               end
@@ -105,7 +111,7 @@ module VagrantPlugins
                 b3.use ForwardPorts
                 b3.use PrepareNFSSettings
                 b3.use ShareFolders
-             end
+              end
             end
           end
         end
@@ -118,17 +124,18 @@ module VagrantPlugins
           b.use ConfigValidate
           b.use ClearForwardedPorts
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsSuspended do |env2, b3|
+              b3.use CreateNetworks if env2[:result]
               b3.use ResumeDomain if env2[:result]
             end
 
             b2.use Call, IsRunning do |env2, b3|
-              next if !env2[:result]
+              next unless env2[:result]
 
               # VM is running, halt it.
               b3.use HaltDomain
@@ -142,7 +149,7 @@ module VagrantPlugins
       def self.action_reload
         Vagrant::Action::Builder.new.tap do |b|
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
@@ -168,24 +175,26 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               # Try to remove stale volumes anyway
               b2.use SetNameOfDomain
-              if env[:machine].config.vm.box
-                b2.use RemoveStaleVolume
-              end
-              if !env[:result]
-                b2.use MessageNotCreated
-              end
+              b2.use RemoveStaleVolume if env[:machine].config.vm.box
+              b2.use MessageNotCreated unless env[:result]
 
               next
             end
 
-            b2.use ClearForwardedPorts
-            # b2.use PruneNFSExports
-            b2.use DestroyDomain
-            b2.use DestroyNetworks
-            b2.use ProvisionerCleanup
+            b2.use Call, DestroyConfirm do |env2, b3|
+              if env2[:result]
+                b3.use ClearForwardedPorts
+                # b3.use PruneNFSExports
+                b3.use DestroyDomain
+                b3.use DestroyNetworks
+                b3.use ProvisionerCleanup
+              else
+                b3.use MessageWillNotDestroy
+              end
+            end
           end
         end
       end
@@ -195,13 +204,13 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsRunning do |env2, b3|
-              if !env2[:result]
+              unless env2[:result]
                 b3.use MessageNotRunning
                 next
               end
@@ -217,13 +226,13 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsRunning do |env2, b3|
-              if !env2[:result]
+              unless env2[:result]
                 b3.use MessageNotRunning
                 next
               end
@@ -241,13 +250,13 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsRunning do |env2, b3|
-              if !env2[:result]
+              unless env2[:result]
                 b3.use MessageNotRunning
                 next
               end
@@ -263,16 +272,17 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsSuspended do |env2, b3|
-              if !env2[:result]
+              unless env2[:result]
                 b3.use MessageNotSuspended
                 next
               end
+              b3.use CreateNetworks
               b3.use ResumeDomain
             end
           end
@@ -291,13 +301,13 @@ module VagrantPlugins
         Vagrant::Action::Builder.new.tap do |b|
           b.use ConfigValidate
           b.use Call, IsCreated do |env, b2|
-            if !env[:result]
+            unless env[:result]
               b2.use MessageNotCreated
               next
             end
 
             b2.use Call, IsRunning do |env2, b3|
-              if !env2[:result]
+              unless env2[:result]
                 b3.use MessageNotRunning
                 next
               end
@@ -305,7 +315,6 @@ module VagrantPlugins
               b3.use SSHRun
             end
           end
-
         end
       end
 
@@ -330,6 +339,7 @@ module VagrantPlugins
       autoload :MessageNotCreated, action_root.join('message_not_created')
       autoload :MessageNotRunning, action_root.join('message_not_running')
       autoload :MessageNotSuspended, action_root.join('message_not_suspended')
+      autoload :MessageWillNotDestroy, action_root.join('message_will_not_destroy')
 
       autoload :RemoveStaleVolume, action_root.join('remove_stale_volume')
 
@@ -351,7 +361,7 @@ module VagrantPlugins
       autoload :WaitTillUp, action_root.join('wait_till_up')
       autoload :PrepareNFSValidIds, action_root.join('prepare_nfs_valid_ids')
 
-      autoload :SSHRun,  'vagrant/action/builtin/ssh_run'
+      autoload :SSHRun, 'vagrant/action/builtin/ssh_run'
       autoload :HandleBox, 'vagrant/action/builtin/handle_box'
       autoload :SyncedFolders, 'vagrant/action/builtin/synced_folders'
       autoload :SyncedFolderCleanup, 'vagrant/action/builtin/synced_folder_cleanup'

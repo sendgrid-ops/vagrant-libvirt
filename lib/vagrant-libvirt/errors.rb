@@ -29,10 +29,13 @@ module VagrantPlugins
         error_key(:creating_storage_pool_error)
       end
 
+      class CreatingVolumeError < VagrantLibvirtError
+        error_key(:creating_volume_error)
+      end
+
       class ImageUploadError < VagrantLibvirtError
         error_key(:image_upload_error)
       end
-
 
       # Box exceptions
       class NoBoxVolume < VagrantLibvirtError
@@ -50,7 +53,6 @@ module VagrantPlugins
       class WrongBoxFormatSet < VagrantLibvirtError
         error_key(:wrong_box_format)
       end
-
 
       # Fog libvirt exceptions
       class FogError < VagrantLibvirtError
@@ -110,9 +112,17 @@ module VagrantPlugins
         error_key(:tunnel_port_not_defined)
       end
 
+      class ManagementNetworkRequired < VagrantLibvirtError
+        error_key(:management_network_required)
+      end
+
       # Other exceptions
       class InterfaceSlotNotAvailable < VagrantLibvirtError
         error_key(:interface_slot_not_available)
+      end
+
+      class InterfaceSlotExhausted < VagrantLibvirtError
+        error_key(:interface_slot_exhausted)
       end
 
       class RsyncError < VagrantLibvirtError
@@ -142,7 +152,6 @@ module VagrantPlugins
       class DeleteSnapshotError < VagrantLibvirtError
         error_key(:delete_snapshot_error)
       end
-
     end
   end
 end

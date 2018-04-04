@@ -8,9 +8,9 @@ module VagrantPlugins
       class PrepareNFSSettings
         include Vagrant::Action::Builtin::MixinSyncedFolders
 
-        def initialize(app,env)
+        def initialize(app, _env)
           @app = app
-          @logger = Log4r::Logger.new("vagrant::action::vm::nfs")
+          @logger = Log4r::Logger.new('vagrant::action::vm::nfs')
         end
 
         def call(env)
@@ -18,7 +18,7 @@ module VagrantPlugins
           @app.call(env)
 
           if using_nfs?
-            @logger.info("Using NFS, preparing NFS settings by reading host IP and machine IP")
+            @logger.info('Using NFS, preparing NFS settings by reading host IP and machine IP')
             env[:nfs_machine_ip] = read_machine_ip(env[:machine])
             env[:nfs_host_ip]    = read_host_ip(env[:nfs_machine_ip])
 
@@ -39,9 +39,9 @@ module VagrantPlugins
         #
         # @param [Machine] machine
         # @return [String]
-	def read_host_ip(ip)
+        def read_host_ip(ip)
           UDPSocket.open do |s|
-            if(ip.kind_of?(Array))
+            if ip.is_a?(Array)
               s.connect(ip.last, 1)
             else
               s.connect(ip, 1)
@@ -49,6 +49,7 @@ module VagrantPlugins
             s.addr.last
           end
         end
+
         # Returns the IP address of the guest
         #
         # @param [Machine] machine
@@ -59,8 +60,8 @@ module VagrantPlugins
           return ssh_host if ping(ssh_host)
 
           # check other ips
-          command = "ip addr show | grep -i 'inet ' | grep -v '127.0.0.1' | tr -s ' ' | cut -d' ' -f3 | cut -d'/' -f 1"
-          result  = ""
+          command = "ip=$(which ip); ${ip:-/sbin/ip} addr show | grep -i 'inet ' | grep -v '127.0.0.1' | tr -s ' ' | cut -d' ' -f3 | cut -d'/' -f 1"
+          result  = ''
           machine.communicate.execute(command) do |type, data|
             result << data if type == :stdout
           end

@@ -8,7 +8,7 @@ error() {
 }
 
 usage() {
-    echo "Usage: ${0} IMAGE [BOX]"
+    echo "Usage: ${0} IMAGE [BOX] [Vagrantfile.add]"
     echo
     echo "Package a qcow2 image into a vagrant-libvirt reusable box"
 }
@@ -32,7 +32,7 @@ isabspath(){
     [[ "$path" =~ ^/.* ]]
 }
 
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     usage
     exit 1
 fi
@@ -62,6 +62,10 @@ mkdir -p "$TMP_DIR"
 
 [[ ! -r "$IMG" ]] && error "'$IMG': Permission denied"
 
+if [ -n "$3" ] && [ -r "$3" ]; then
+  VAGRANTFILE_ADD="$(cat $3)"
+fi
+
 # We move / copy (when the image has master) the image to the tempdir
 # ensure that it's moved back / removed again
 if [[ -n $(backing "$IMG") ]]; then
@@ -84,7 +88,7 @@ cd "$TMP_DIR"
 #Using the awk int function here to truncate the virtual image size to an
 #integer since the fog-libvirt library does not seem to properly handle
 #floating point.
-IMG_SIZE=$(qemu-img info "$TMP_IMG" | awk '/virtual size/{print int($3)+1;}' | tr -d 'G')
+IMG_SIZE=$(qemu-img info --output=json "$TMP_IMG" | awk '/virtual-size/{s=int($2)/(1024^3); print (s == int(s)) ? s : int(s)+1 }')
 
 echo "{$IMG_SIZE}"
 
@@ -107,12 +111,14 @@ Vagrant.configure("2") do |config|
     libvirt.storage_pool_name = "default"
 
   end
+
+${VAGRANTFILE_ADD:-}
 end
 EOF
 
 echo "==> Creating box, tarring and gzipping"
 
-tar cvzf "$BOX" --totals ./metadata.json ./Vagrantfile ./box.img
+tar cvzf "$BOX" -S --totals ./metadata.json ./Vagrantfile ./box.img
 
 # if box is in tmpdir move it to CWD before removing tmpdir
 if ! isabspath "$BOX"; then
